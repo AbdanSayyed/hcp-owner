@@ -1,0 +1,6 @@
+import React from 'react';import {Text,Pressable,Alert} from 'react-native';import {useRouter} from 'expo-router';import AsyncStorage from '@react-native-async-storage/async-storage';import {Screen,Card} from '../src/lib/ui';import {useAuth} from '../src/store/auth';import {c} from '../src/lib/theme';
+export default function Settings(){const r=useRouter();const{baseUrl,user,logout}=useAuth();
+ return <Screen title="Settings"><Pressable onPress={()=>r.back()}><Text style={{color:c.ink,fontWeight:'700'}}>‹ Back</Text></Pressable>
+  <Card><Text style={{color:c.mute}}>Server</Text><Text style={{fontWeight:'600'}}>{baseUrl}</Text><Text style={{color:c.mute,marginTop:8}}>Signed in as</Text><Text style={{fontWeight:'600'}}>{user?.username||'not signed in'}{user?.role?` (${user.role})`:''}</Text></Card>
+  <Pressable onPress={async()=>{const k=(await AsyncStorage.getAllKeys()).filter(x=>x.startsWith('c:'));await AsyncStorage.multiRemove(k);Alert.alert('Saved data cleared')}}><Card><Text style={{fontWeight:'700',color:c.ink}}>Clear saved offline data</Text></Card></Pressable>
+  <Pressable onPress={logout}><Card><Text style={{color:c.ink,fontWeight:'700'}}>Reconnect to CRM</Text></Card></Pressable></Screen>}

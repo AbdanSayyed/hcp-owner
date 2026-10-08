@@ -1,0 +1,16 @@
+import React,{useCallback,useEffect,useState} from 'react';import {View,Text,ScrollView,RefreshControl,Pressable,StyleSheet} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';import {c,when} from './theme';import {useAuth} from '../store/auth';import {DEMO_MODE} from '../config';import {errMsg,NotConnected} from '../api/client';
+export function useLoad<T>(fn:()=>Promise<T>,deps:any[]=[],key?:string){const[data,set]=useState<T|null>(null);const[err,setErr]=useState<any>(null);const[busy,setBusy]=useState(false);const[at,setAt]=useState<string>();
+ const run=useCallback(async()=>{setBusy(true);try{const d=await fn();set(d);setErr(null);const t=new Date().toISOString();setAt(t);if(key)AsyncStorage.setItem('c:'+key,JSON.stringify({d,t})).catch(()=>{})}
+  catch(e){setErr(e);if(key){try{const j=await AsyncStorage.getItem('c:'+key);if(j){const x=JSON.parse(j);set(x.d);setAt(x.t)}}catch{}}}finally{setBusy(false)}},deps);
+ useEffect(()=>{run()},[run]);return{data,err,busy,at,reload:run}}
+export function Screen({title,busy,reload,err,at,children}:any){const authError=useAuth(x=>x.authError);return(<View style={{flex:1,backgroundColor:c.bg}}>
+ <View style={s.head}><Text style={s.title}>{title}</Text>{DEMO_MODE&&<Text style={{color:'#F2C879',fontSize:11,marginTop:2}}>DEMO · sample data, not real hotel records</Text>}{at&&<Text style={s.sub}>{err&&!(err instanceof NotConnected)?'Offline · last updated ':'Updated '}{when(at)}</Text>}</View>
+ <ScrollView contentContainerStyle={{padding:16,gap:12}} refreshControl={<RefreshControl refreshing={!!busy} onRefresh={reload} tintColor={c.ink}/>}>
+ {authError&&<View style={[s.card,{borderColor:c.bad}]}><Text style={{color:c.bad,fontWeight:'600'}}>Sign-in to the CRM failed: {authError}</Text><Text style={{color:c.mute,marginTop:4}}>Set the manager username and password in src/config.ts, then reload the app.</Text><Pressable onPress={()=>useAuth.getState().signIn().then(reload)}><Text style={{color:c.ink,marginTop:8,fontWeight:'700'}}>Try again</Text></Pressable></View>}
+ {err&&<View style={[s.card,{borderColor:c.bad}]}><Text style={{color:c.bad,fontWeight:'600'}}>{errMsg(err)}{at&&!(err instanceof NotConnected)?' Showing saved data (read-only).':''}</Text><Pressable onPress={reload}><Text style={{color:c.ink,marginTop:8,fontWeight:'700'}}>Retry</Text></Pressable></View>}
+ {children}</ScrollView></View>)}
+export const Card=({children,style}:any)=><View style={[s.card,style]}>{children}</View>;
+export const Badge=({text,color}:{text:string;color:string})=><Text style={{color,borderColor:color,borderWidth:1,borderRadius:6,paddingHorizontal:8,paddingVertical:2,fontSize:12,fontWeight:'700',overflow:'hidden'}}>{text}</Text>;
+export const Btn=({label,onPress,kind='ink',disabled}:any)=><Pressable disabled={disabled} onPress={onPress} style={{flex:1,padding:13,borderRadius:10,alignItems:'center',backgroundColor:kind==='bad'?c.bad:kind==='ok'?c.ok:c.ink,opacity:disabled?.5:1}}><Text style={{color:'#fff',fontWeight:'700'}}>{label}</Text></Pressable>;
+export const s=StyleSheet.create({head:{backgroundColor:c.ink,paddingTop:48,paddingBottom:16,paddingHorizontal:16},title:{color:'#fff',fontSize:24,fontWeight:'700'},sub:{color:'#B9C7C3',fontSize:12,marginTop:2},card:{backgroundColor:c.card,borderRadius:12,padding:14,borderWidth:1,borderColor:c.line}});

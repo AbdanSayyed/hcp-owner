@@ -1,0 +1,10 @@
+import React from 'react';import {useRouter} from 'expo-router';import {Text,Pressable,View} from 'react-native';import {api} from '../../src/api/client';import {Screen,Card,useLoad} from '../../src/lib/ui';import {useAuth} from '../../src/store/auth';import {c,when} from '../../src/lib/theme';
+export default function More(){const{user,baseUrl,logout}=useAuth();const r=useRouter();const{data,err,busy,at,reload}=useLoad(async()=>{const n=await api.notifications();useAuth.getState().setBadges({unread:n.filter((x:any)=>!x.read).length});return n});
+ return <Screen title="More" {...{busy,reload,at,err:err&&err.message.includes('endpoint')?null:err}}>
+  <Card><Text style={{fontWeight:'700'}}>{user?.full_name||user?.username}</Text><Text style={{color:c.mute}}>{baseUrl}</Text></Card>
+  <Text style={{fontWeight:'700',color:c.ink,fontSize:16}}>Notifications</Text>
+  {data?.length?<Pressable onPress={async()=>{await api.markRead();reload()}}><Text style={{color:c.ink,fontWeight:'700'}}>Mark all read</Text></Pressable>:null}
+  {!data&&<Card><Text style={{color:c.mute}}>No notifications yet.</Text></Card>}
+  {(data||[]).map((n:any)=><Pressable key={n.id} onPress={async()=>{await api.markRead(n.id);reload()}}><Card style={{opacity:n.read?.6:1}}><Text style={{fontWeight:n.read?'400':'700'}}>{n.title}</Text><Text>{n.body}</Text><Text style={{color:c.mute,fontSize:12}}>{n.type} · {when(n.created_at)}</Text></Card></Pressable>)}
+  <Pressable onPress={()=>r.push('/analytics')}><Card><Text style={{fontWeight:'700',color:c.ink}}>Analytics</Text></Card></Pressable><Pressable onPress={()=>r.push('/settings')}><Card><Text style={{fontWeight:'700',color:c.ink}}>Settings</Text></Card></Pressable>
+  <Pressable onPress={logout}><Card><Text style={{color:c.ink,fontWeight:'700'}}>Reconnect to CRM</Text></Card></Pressable></Screen>}
