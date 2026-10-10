@@ -93,7 +93,18 @@ function sumBy(from: string, to: string) {
     gstCollections: inr.reduce((t, b) => t + (Number(b.tax) || 0), 0), totalExpenses, netProfit: totalRealized - totalExpenses, pendingChequesAmount: 18500};
 }
 
+// Sample occupied rooms for the demo build (12, matching the Occupied count on Home).
+const DEMO_STAYS = ['101', '102', '105', '106', '203', '204', '207', '208', '301', '302', '303', '305'].map((room, i) => {
+  const nights = 1 + i % 3, roomCharge = [2200, 2800, 3500, 4200][i % 4] * nights, restaurant = (i * 370) % 1800, bar = i % 2 ? (i * 210) % 1400 : 0;
+  const extra = i % 5 === 2 ? 1500 : 0, total = roomCharge + restaurant + bar + extra, paid = i % 3 === 0 ? total : Math.round(roomCharge * 0.5 / 100) * 100;
+  return {id: 'd' + i, room, guest: NAMES[i % NAMES.length], checkIn: at(i % 2, 8 + i % 6, 10 + i * 3), checkOut: at(-Math.max(1, nights - i % 2), 11, 0),
+    roomCharge, restaurant, bar, extra, discount: 0, total, paid, pending: Math.max(total - paid, 0)};
+});
+
 const wait = <T,>(v: T) => new Promise<T>(r => setTimeout(() => r(v), 250));
+
+const ROOM_ORDERS: Record<string, any[]> = {};
+const findRoomOrder = (dept: string, id: any) => Object.values(ROOM_ORDERS).flat().find(b => b.dept.toLowerCase() === dept.toLowerCase() && String(b.id) === String(id));
 
 export function makeDemoApi(billCache: Map<string, any>) {
   BILLS.forEach(b => billCache.set(b.dept + ':' + b.id, b));
@@ -102,8 +113,26 @@ export function makeDemoApi(billCache: Map<string, any>) {
     stats: () => { const k = dayKey(at(0, 0, 0)); const t = sumBy(k, k);
       return wait({rooms: {total: 24, ready: 9, occupied: 12, cleaning: 2, maintenance: 1}, revenue: {hospitality: t.roomRevenue, restaurant: t.restaurantRevenue, bar: t.barRevenue, total: t.totalRealized}}); },
     analytics: (from: string, to: string) => wait({stats: sumBy(from, to)}),
+    occupied: async () => wait(DEMO_STAYS),
+    roomOrders: async (stay: any) => {
+      if (!ROOM_ORDERS[stay.room]) ROOM_ORDERS[stay.room] = (['Restaurant', 'Bar'] as const).map((dept, i) => {
+        const src = BILLS.find(b => b.dept === dept)!;
+        return {...src, id: 'D' + stay.room + i, order_number: (dept === 'Bar' ? 'BAR-' : 'RES-') + stay.room + i, room_number: stay.room, is_paid: i === 0 ? 0 : 1,
+          payment_mode: i === 0 ? 'room_folio' : 'cash', created_at: at(i === 0 ? 5 : 0, 9, 51)};
+      });
+      return wait([...ROOM_ORDERS[stay.room]]);
+    },
+    editBill: async (dept: string, id: any, body: any) => {
+      const o = findRoomOrder(dept, id); if (!o) throw new Error('Bill not found.');
+      o.items_json = JSON.stringify(body.items || []); o.subtotal = body.subtotal; o.tax = body.tax; o.discount = body.discount; o.total = body.total;
+      return wait({ok: true});
+    },
+    deleteBill: async (dept: string, id: any) => {
+      for (const k of Object.keys(ROOM_ORDERS)) ROOM_ORDERS[k] = ROOM_ORDERS[k].filter(b => !(b.dept.toLowerCase() === dept.toLowerCase() && String(b.id) === String(id)));
+      return wait({ok: true});
+    },
     bills: async (_p: any = {}) => { const out: any = [...BILLS]; out.roomOk = true; return wait(out); },
-    order: async (dept: string, id: any) => { const o = BILLS.find(b => b.dept === dept && String(b.id) === String(id));
+    order: async (dept: string, id: any) => { const o = findRoomOrder(dept, id) || BILLS.find(b => b.dept === dept && String(b.id) === String(id));
       if (!o) throw new Error('Bill not found in demo data.');
       const logs = Number(o.discount) > 0 ? [{id: 1, action: 'settled', staff_user: o.settled_by, change_summary: `Bill settled with discount ${money(o.discount)}`, previous_total: o.subtotal + o.tax, new_total: o.total, timestamp: o.created_at}] : [];
       return wait({order: o, logs}); },

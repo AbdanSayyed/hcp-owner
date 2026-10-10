@@ -1,7 +1,7 @@
 // All CRM access goes through here. EXISTING = routes found in the CRM audit (response shapes
 // are normalised defensively; they were not verified). OWNER = routes that do NOT exist in the
 // CRM yet; screens show a "not connected" state until they are added server-side.
-import axios from 'axios';import AsyncStorage from '@react-native-async-storage/async-storage';import {useAuth} from '../store/auth';import {money} from '../lib/theme';import {DEMO_MODE} from '../config';import {makeDemoApi} from './demo';
+import axios from 'axios';import AsyncStorage from '@react-native-async-storage/async-storage';import {useAuth} from '../store/auth';import {money} from '../lib/theme';import {DEMO_MODE} from '../config';import {makeDemoApi} from './demo';import {isInHouse,toStay} from '../lib/stay';
 // ---- CRM safety: every path the app may touch. ROOM_BILLS = /hospitality/history (exists in the CRM; returns bookings, filtered below to checked-out stays). ----
 export const ROUTES={login:'/api/auth/login',stats:'/stats',analytics:'/manager/analytics',restaurantBills:'/restaurant/settled-bills',barBills:'/bar/settled-bills',
  restaurantOrder:'/restaurant/orders/',barOrder:'/bar/orders/',ROOM_BILLS:'/hospitality/history'};
@@ -16,7 +16,7 @@ const sget=(url:string,params?:any)=>{const k=url+JSON.stringify(params||{});con
 http.interceptors.request.use(cfg=>{const{baseUrl,token}=useAuth.getState();cfg.baseURL=baseUrl.replace(/\/$/,'')+'/api';if(token)cfg.headers.Authorization=`Bearer ${token}`;return cfg});
 http.interceptors.response.use(r=>r,async e=>{const cfg:any=e.config;if(e.response?.status===401&&cfg&&!cfg._retry){cfg._retry=true;inflight.clear();const ok=await useAuth.getState().signIn();if(ok)return http.request(cfg)}return Promise.reject(e)});
 export class NotConnected extends Error{constructor(){super('This feature needs an owner endpoint that the CRM server does not have yet.')}}
-export const errMsg=(e:any)=>e instanceof NotConnected?e.message:e?.response?.data?.error||(!e?.response?'Cannot reach the CRM server. Check your connection.':e?.message||'Something went wrong');
+export const errMsg=(e:any)=>e instanceof NotConnected?e.message:e?.response?.data?.error||(e?.isAxiosError&&!e?.response?'Cannot reach the CRM server. Check your connection.':e?.message||'Something went wrong');
 async function owner<T>(fn:()=>Promise<T>){try{return await fn()}catch(e:any){if(e?.response?.status===404)throw new NotConnected();throw e}}
 const arr=(d:any)=>Array.isArray(d)?d:d?.data||d?.items||d?.bills||d?.orders||d?.history||[];
 
@@ -79,6 +79,16 @@ const realApi={
   const core=rs.slice(0,2);if(core.every(x=>x.status==='rejected'))throw (core[0] as any).reason;
   const roomOk=rs[2].status==='fulfilled';const out=rs.flatMap(x=>x.status==='fulfilled'?x.value:[]).sort((x:any,y:any)=>String(y.created_at||'').localeCompare(String(x.created_at||'')));
   out.forEach((b:any)=>billCache.set(b.dept+':'+b.id,b));(out as any).roomOk=roomOk;return out},
+ // Rooms that are occupied right now: in-house bookings from the CRM's read-only /hospitality/history.
+ occupied:()=>sget(ROUTES.ROOM_BILLS,{limit:200}).then(r=>arr(r.data).filter(isInHouse).map(toStay).sort((x:any,y:any)=>String(x.room).localeCompare(String(y.room),undefined,{numeric:true}))),
+ // Restaurant/Bar bills for one stay (room-folio orders). GET only. Lists that 404 are skipped; matched by room number / booking id and stay start.
+ async roomOrders(stay:any){const rs=await Promise.allSettled([sget(ROUTES.restaurantBills,{period:'week'}),sget(ROUTES.barBills,{period:'week'}),sget('/restaurant/orders'),sget('/bar/orders')]);const dept=['Restaurant','Bar','Restaurant','Bar'];const seen=new Set<string>(),out:any[]=[];
+  rs.forEach((r,i)=>{if(r.status!=='fulfilled')return;arr(r.value.data).forEach((b:any)=>{const rm=String(b.room_number??b.room_id??''),bk=String(b.booking_id??b.stay_id??'');const same=(rm!==''&&rm===String(stay.room))||(bk!==''&&bk===String(stay.id));if(!same)return;
+   if(stay.checkIn&&ts(b.created_at)&&ts(b.created_at)<ts(stay.checkIn)-6e4)return;const k=dept[i]+':'+b.id;if(seen.has(k))return;seen.add(k);out.push({...b,dept:dept[i],room_number:b.room_number||stay.room})})});
+  return out.sort((x,y)=>ts(y.created_at)-ts(x.created_at))},
+ // Admin-only writes. They go to /owner/bills/* (the only write path this app allows) so the CRM stays the source of truth.
+ editBill:(dept:string,id:any,body:any)=>owner(()=>http.put(`/owner/bills/${dept.toLowerCase()}/${id}`,body).then(r=>r.data)),
+ deleteBill:(dept:string,id:any)=>owner(()=>http.delete(`/owner/bills/${dept.toLowerCase()}/${id}`).then(r=>r.data)),
  order:(dept:string,id:any)=>sget((dept==='Bar'?ROUTES.barOrder:ROUTES.restaurantOrder)+id).then(r=>r.data as {order:any;logs:any[]}),
  approvals:()=>ownerOr(()=>owner(()=>http.get('/owner/approvals').then(r=>arr(r.data))),derived.approvals),
  approve:(id:any)=>owner(()=>http.post(`/owner/approvals/${id}/approve`).then(r=>r.data)),
